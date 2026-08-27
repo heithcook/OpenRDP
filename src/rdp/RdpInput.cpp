@@ -38,6 +38,30 @@ std::uint32_t qtKeyToVirtualKey(const Qt::Key key)
     case Qt::Key_Insert: return VK_INSERT;
     case Qt::Key_Delete: return VK_DELETE;
     case Qt::Key_Meta: return VK_LWIN;
+    // On Qt, Shift+number and Shift+OEM keys are reported as the resulting
+    // symbol. The separate Shift key event supplies the modifier remotely;
+    // map both forms to the same physical Windows key.
+    case Qt::Key_Exclam: return VK_KEY_1;
+    case Qt::Key_At: return VK_KEY_2;
+    case Qt::Key_NumberSign: return VK_KEY_3;
+    case Qt::Key_Dollar: return VK_KEY_4;
+    case Qt::Key_Percent: return VK_KEY_5;
+    case Qt::Key_AsciiCircum: return VK_KEY_6;
+    case Qt::Key_Ampersand: return VK_KEY_7;
+    case Qt::Key_Asterisk: return VK_KEY_8;
+    case Qt::Key_ParenLeft: return VK_KEY_9;
+    case Qt::Key_ParenRight: return VK_KEY_0;
+    case Qt::Key_Minus: case Qt::Key_Underscore: return VK_OEM_MINUS;
+    case Qt::Key_Equal: case Qt::Key_Plus: return VK_OEM_PLUS;
+    case Qt::Key_BracketLeft: case Qt::Key_BraceLeft: return VK_OEM_4;
+    case Qt::Key_BracketRight: case Qt::Key_BraceRight: return VK_OEM_6;
+    case Qt::Key_Backslash: case Qt::Key_Bar: return VK_OEM_5;
+    case Qt::Key_Semicolon: case Qt::Key_Colon: return VK_OEM_1;
+    case Qt::Key_Apostrophe: case Qt::Key_QuoteDbl: return VK_OEM_7;
+    case Qt::Key_Comma: case Qt::Key_Less: return VK_OEM_COMMA;
+    case Qt::Key_Period: case Qt::Key_Greater: return VK_OEM_PERIOD;
+    case Qt::Key_Slash: case Qt::Key_Question: return VK_OEM_2;
+    case Qt::Key_QuoteLeft: case Qt::Key_AsciiTilde: return VK_OEM_3;
     default: return 0;
     }
 }

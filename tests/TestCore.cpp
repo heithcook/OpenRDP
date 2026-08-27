@@ -26,6 +26,19 @@ private slots:
     void scaling() {
         QCOMPARE(openrdp::scaleMousePosition({640, 360}, {1280, 720}, {1920, 1080}), QPoint(960, 540));
     }
+    void usKeyboardSymbols() {
+        QCOMPARE(openrdp::qtKeyToVirtualKey(Qt::Key_Exclam), openrdp::qtKeyToVirtualKey(Qt::Key_1));
+        QCOMPARE(openrdp::qtKeyToVirtualKey(Qt::Key_At), openrdp::qtKeyToVirtualKey(Qt::Key_2));
+        QCOMPARE(openrdp::qtKeyToVirtualKey(Qt::Key_Underscore), openrdp::qtKeyToVirtualKey(Qt::Key_Minus));
+        QCOMPARE(openrdp::qtKeyToVirtualKey(Qt::Key_Plus), openrdp::qtKeyToVirtualKey(Qt::Key_Equal));
+        QVERIFY(openrdp::qtKeyToVirtualKey(Qt::Key_BraceLeft) != 0);
+        QVERIFY(openrdp::qtKeyToVirtualKey(Qt::Key_Bar) != 0);
+        QVERIFY(openrdp::qtKeyToVirtualKey(Qt::Key_Colon) != 0);
+        QVERIFY(openrdp::qtKeyToVirtualKey(Qt::Key_QuoteDbl) != 0);
+        QVERIFY(openrdp::qtKeyToVirtualKey(Qt::Key_Less) != 0);
+        QVERIFY(openrdp::qtKeyToVirtualKey(Qt::Key_Question) != 0);
+        QVERIFY(openrdp::qtKeyToVirtualKey(Qt::Key_AsciiTilde) != 0);
+    }
 };
 QTEST_MAIN(TestCore)
 #include "TestCore.moc"

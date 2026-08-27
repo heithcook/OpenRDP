@@ -40,4 +40,10 @@ environment. These entries intentionally remain `NOT TESTED`.
 | Network loss | NOT TESTED |
 | Interactive ASAN/UBSAN session | NOT TESTED |
 
+## Windows 11 observations
+
+- Real NLA/TLS connection and desktop rendering: PASS (user-observed on 2026-08-27).
+- Basic letters and numbers: PASS.
+- Symbols/punctuation: FAIL in the initial build; OEM-key mapping fix pending retest.
+
 Phase 1 is therefore not declared complete.
