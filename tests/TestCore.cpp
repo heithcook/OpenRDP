@@ -1,6 +1,9 @@
 #include <QtTest>
 #include "rdp/RdpInput.h"
 #include "rdp/RdpSettings.h"
+#include "app/ConnectionHistory.h"
+#include <QTemporaryDir>
+#include <freerdp/scancode.h>
 #include <winpr/input.h>
 
 class TestCore final : public QObject {
@@ -50,6 +53,22 @@ private slots:
         QVERIFY(GetVirtualScanCodeFromVirtualKeyCode(shift, 4) != 0);
         QVERIFY(GetVirtualScanCodeFromVirtualKeyCode(control, 4) != 0);
         QVERIFY(GetVirtualScanCodeFromVirtualKeyCode(alt, 4) != 0);
+    }
+    void navigationScancodesAreExtended() {
+        const std::array keys{VK_LEFT,VK_UP,VK_RIGHT,VK_DOWN,VK_PRIOR,VK_NEXT,VK_END,VK_HOME,VK_INSERT,VK_DELETE};
+        for (const auto key : keys) QVERIFY(RDP_SCANCODE_EXTENDED(openrdp::virtualKeyToRdpScancode(key)));
+        QCOMPARE(openrdp::virtualKeyToRdpScancode(VK_LEFT),static_cast<std::uint32_t>(RDP_SCANCODE_LEFT));
+    }
+    void connectionHistory() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        openrdp::ConnectionHistory history(directory.filePath(QStringLiteral("history.json")));
+        const openrdp::ConnectionHistoryEntry first{QStringLiteral("server01"),QStringLiteral("CONTOSO\\user"),openrdp::AuthenticationMode::NlaPassword};
+        const openrdp::ConnectionHistoryEntry second{QStringLiteral("cloud.example"),QStringLiteral("user@example.com"),openrdp::AuthenticationMode::EntraWebAccount};
+        QVERIFY(history.record(first)); QVERIFY(history.record(second));
+        auto entries=history.load(); QCOMPARE(entries.size(),2); QCOMPARE(entries.at(0),second); QCOMPARE(entries.at(1),first);
+        QVERIFY(history.record(first)); entries=history.load(); QCOMPARE(entries.size(),2); QCOMPARE(entries.at(0),first);
+        QFile file(history.filePath()); QVERIFY(file.open(QIODevice::ReadOnly));
+        const QByteArray contents=file.readAll(); QVERIFY(!contents.contains("password")); QVERIFY(!contents.contains("token"));
     }
     void aadRedirectParsing() {
         const auto code = openrdp::authorizationCodeFromRedirect(

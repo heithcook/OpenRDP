@@ -1,6 +1,7 @@
 #include "rdp/RdpInput.h"
 
 #include <algorithm>
+#include <freerdp/scancode.h>
 #include <winpr/input.h>
 
 namespace openrdp {
@@ -66,6 +67,25 @@ std::uint32_t qtKeyToVirtualKey(const Qt::Key key)
     case Qt::Key_Slash: case Qt::Key_Question: return VK_OEM_2;
     case Qt::Key_QuoteLeft: case Qt::Key_AsciiTilde: return VK_OEM_3;
     default: return 0;
+    }
+}
+
+std::uint32_t virtualKeyToRdpScancode(const std::uint32_t virtualKey)
+{
+    // Navigation keys use the extended E0 scancode set. Spell these out so
+    // they cannot be confused with the numeric-keypad keys sharing 0x47-0x53.
+    switch (virtualKey) {
+    case VK_LEFT: return RDP_SCANCODE_LEFT;
+    case VK_UP: return RDP_SCANCODE_UP;
+    case VK_RIGHT: return RDP_SCANCODE_RIGHT;
+    case VK_DOWN: return RDP_SCANCODE_DOWN;
+    case VK_PRIOR: return RDP_SCANCODE_PRIOR;
+    case VK_NEXT: return RDP_SCANCODE_NEXT;
+    case VK_END: return RDP_SCANCODE_END;
+    case VK_HOME: return RDP_SCANCODE_HOME;
+    case VK_INSERT: return RDP_SCANCODE_INSERT;
+    case VK_DELETE: return RDP_SCANCODE_DELETE;
+    default: return GetVirtualScanCodeFromVirtualKeyCode(virtualKey, 4);
     }
 }
 } // namespace openrdp

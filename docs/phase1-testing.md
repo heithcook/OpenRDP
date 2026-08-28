@@ -48,5 +48,9 @@ environment. These entries intentionally remain `NOT TESTED`.
 - Shifted symbols: FAIL in first retest because Shift remained pressed; explicit modifier-state fix pending retest.
 - Microsoft Entra web authentication with phone/passkey QR: initial PASS on 2026-08-27;
   broader repeat, cancellation, and failure-path testing remains required.
+- Arrow/navigation keys: extended-scancode fix is covered by unit tests; live Windows
+  interoperability retest required.
+- Recent-session persistence: serialization, deduplication, ordering, and absence of
+  password/token fields are covered by unit tests; live UI retest required.
 
 Phase 1 is therefore not declared complete.

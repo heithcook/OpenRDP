@@ -18,6 +18,7 @@ Built and automatically tested:
 - NLA/TLS secure defaults
 - In-memory credential prompt
 - Per-connection normal NLA/password or Microsoft Entra web-account mode
+- Recent successful sessions selectable without retyping server or username
 - Per-connection certificate prompt
 - FreeRDP software-GDI framebuffer display
 - Mouse and scancode input paths
@@ -65,6 +66,10 @@ private Chromium session so Microsoft's complete phone/passkey QR experience rem
 available. It observes the browser's loopback-only debugging endpoint and intercepts
 the native-client redirect internally. The temporary profile is deleted after sign-in;
 authorization codes and access tokens are never copied to the clipboard or saved.
+
+After a successful connection, OpenRDP adds the server, username, and selected
+authentication mode to **Previous session**. It never saves the password or web
+authentication token. History is stored in `~/.config/openrdp/history.json`.
 
 ## Known Phase 1 limitations
 

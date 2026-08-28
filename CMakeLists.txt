@@ -14,6 +14,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(FREERDP REQUIRED IMPORTED_TARGET freerdp3 freerdp-client3 winpr3)
 
 add_library(openrdp_core STATIC
+    src/app/ConnectionHistory.cpp
     src/rdp/RdpSettings.cpp
     src/rdp/RdpInput.cpp
     src/rdp/RdpError.cpp

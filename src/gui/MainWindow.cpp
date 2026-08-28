@@ -5,6 +5,8 @@
 #include "rdp/RdpSettings.h"
 #include <QCloseEvent>
 #include <QCheckBox>
+#include <QComboBox>
+#include <QDir>
 #include <QFormLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -29,14 +31,16 @@ MainWindow::MainWindow(const QString& initialServer,const QString& initialUser,Q
     setWindowTitle(QStringLiteral("OpenRDP")); resize(1100,700);
     pages_=new QStackedWidget(this); setCentralWidget(pages_);
     auto* page=new QWidget; auto* layout=new QVBoxLayout(page); auto* form=new QFormLayout;
+    savedConnections_=new QComboBox; savedConnections_->addItem(QStringLiteral("Select a previous session…"));
     computer_=new QLineEdit(initialServer); username_=new QLineEdit(initialUser); connect_=new QPushButton(QStringLiteral("Connect"));
     webAccount_=new QCheckBox(QStringLiteral("Use a web account to sign in to the remote computer"));
-    form->addRow(QStringLiteral("Computer:"),computer_); form->addRow(QStringLiteral("User name:"),username_);
+    form->addRow(QStringLiteral("Previous session:"),savedConnections_); form->addRow(QStringLiteral("Computer:"),computer_); form->addRow(QStringLiteral("User name:"),username_);
     layout->addLayout(form); layout->addWidget(webAccount_); layout->addWidget(connect_,0,Qt::AlignRight); layout->addStretch(); pages_->addWidget(page);
     display_=new RdpDisplayWidget; pages_->addWidget(display_);
     auto* disconnectAction=menuBar()->addAction(QStringLiteral("Disconnect")); disconnectAction->setEnabled(false);
     session_=new RdpSession; session_->moveToThread(&worker_); worker_.start();
     connect(connect_,&QPushButton::clicked,this,&MainWindow::connectClicked);
+    connect(savedConnections_,qOverload<int>(&QComboBox::activated),this,&MainWindow::selectSavedConnection);
     connect(disconnectAction,&QAction::triggered,this,[this]{emit stopSession();});
     connect(this,&MainWindow::startSession,session_,&RdpSession::connectToServer,Qt::QueuedConnection);
     connect(this,&MainWindow::stopSession,session_,&RdpSession::disconnect,Qt::DirectConnection);
@@ -47,14 +51,27 @@ MainWindow::MainWindow(const QString& initialServer,const QString& initialUser,Q
     connect(session_,&RdpSession::certificateVerificationRequired,this,&MainWindow::showCertificate);
     connect(session_,&RdpSession::webAuthenticationRequired,this,&MainWindow::showWebAuthentication);
     connect(session_,&RdpSession::connectionError,this,&MainWindow::showError);
-    connect(session_,&RdpSession::connected,this,[this,disconnectAction](QSize){pages_->setCurrentWidget(display_);disconnectAction->setEnabled(true);});
+    connect(session_,&RdpSession::connected,this,[this,disconnectAction](QSize){
+        if (pendingHistoryEntry_) {history_.record(*pendingHistoryEntry_);reloadSavedConnections();}
+        pendingHistoryEntry_.reset();pages_->setCurrentWidget(display_);disconnectAction->setEnabled(true);
+    });
     connect(session_,&RdpSession::disconnected,this,[this,disconnectAction]{disconnectAction->setEnabled(false);sessionEnded();});
     connect(session_,&RdpSession::frameUpdated,this,[this](const QImage& frame,QRect){display_->setFrame(frame);});
     connect(display_,&RdpDisplayWidget::mouseInput,session_,&RdpSession::sendMouse,Qt::DirectConnection);
     connect(display_,&RdpDisplayWidget::keyInput,session_,&RdpSession::sendKey,Qt::DirectConnection);
+    reloadSavedConnections();
 }
 MainWindow::~MainWindow(){emit stopSession();worker_.quit();worker_.wait(5000);delete session_;}
-void MainWindow::connectClicked(){QString error;auto parsed=parseServer(computer_->text(),&error);if(!parsed){QMessageBox::warning(this,QStringLiteral("OpenRDP"),error);return;} ConnectionSettings s; s.hostname=parsed->hostname;s.port=parsed->port;parseUsername(username_->text(),s.username,s.domain);s.authenticationMode=webAccount_->isChecked()?AuthenticationMode::EntraWebAccount:AuthenticationMode::NlaPassword;connect_->setEnabled(false);emit startSession(s);}
+void MainWindow::connectClicked(){QString error;auto parsed=parseServer(computer_->text(),&error);if(!parsed){QMessageBox::warning(this,QStringLiteral("OpenRDP"),error);return;} ConnectionSettings s; s.hostname=parsed->hostname;s.port=parsed->port;parseUsername(username_->text(),s.username,s.domain);s.authenticationMode=webAccount_->isChecked()?AuthenticationMode::EntraWebAccount:AuthenticationMode::NlaPassword;pendingHistoryEntry_=ConnectionHistoryEntry{computer_->text().trimmed(),username_->text(),s.authenticationMode};connect_->setEnabled(false);emit startSession(s);}
+void MainWindow::reloadSavedConnections(){
+    savedEntries_=history_.load();savedConnections_->clear();savedConnections_->addItem(QStringLiteral("Select a previous session…"));
+    for(const auto& entry:savedEntries_)savedConnections_->addItem(entry.username.isEmpty()?entry.server:QStringLiteral("%1 — %2").arg(entry.server,entry.username));
+}
+void MainWindow::selectSavedConnection(const int index){
+    if(index<=0||index>savedEntries_.size())return;
+    const auto& entry=savedEntries_.at(index-1);
+    computer_->setText(entry.server);username_->setText(entry.username);webAccount_->setChecked(entry.authenticationMode==AuthenticationMode::EntraWebAccount);
+}
 void MainWindow::showCredentials(QString server,QString user){CredentialDialog d(server,user,this);const bool ok=d.exec()==QDialog::Accepted;emit credentialsProvided(d.username(),ok?d.password():QString(),ok);}
 void MainWindow::showCertificate(CertificateInfo info){CertificateDialog d(info,this);emit certificateDecision(d.exec()==QDialog::Accepted);}
 void MainWindow::showWebAuthentication(QString authorizationUrl){
@@ -77,7 +94,7 @@ void MainWindow::showWebAuthentication(QString authorizationUrl){
         emit webAuthenticationProvided(QString(),false);
         return;
     }
-    QTemporaryDir profileDir(QStringLiteral("openrdp-auth-XXXXXX"));
+    QTemporaryDir profileDir(QDir::tempPath()+QStringLiteral("/openrdp-auth-XXXXXX"));
     if (!profileDir.isValid()) {
         QMessageBox::critical(this,QStringLiteral("Web Account Sign-In"),QStringLiteral("A private browser profile could not be created."));
         emit webAuthenticationProvided(QString(),false);
@@ -131,6 +148,6 @@ void MainWindow::showWebAuthentication(QString authorizationUrl){
     emit webAuthenticationProvided(accepted?redirectUrl:QString(),accepted);
 }
 void MainWindow::showError(RdpError e){QMessageBox box(QMessageBox::Critical,QStringLiteral("Remote Desktop Connection Failed"),e.userMessage,QMessageBox::Ok,this);box.setDetailedText(e.technicalDetails);box.exec();}
-void MainWindow::sessionEnded(){pages_->setCurrentIndex(0);display_->clear();connect_->setEnabled(true);}
+void MainWindow::sessionEnded(){pendingHistoryEntry_.reset();pages_->setCurrentIndex(0);display_->clear();connect_->setEnabled(true);}
 void MainWindow::closeEvent(QCloseEvent* e){emit stopSession();e->accept();}
 }

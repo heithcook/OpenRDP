@@ -275,7 +275,7 @@ void RdpSession::flushInput()
     { QMutexLocker lock(&inputMutex_); events.swap(inputEvents_); }
     for (const auto& event : events) {
         if (event.key) {
-            const UINT32 scan = GetVirtualScanCodeFromVirtualKeyCode(event.first, 4);
+            const UINT32 scan = virtualKeyToRdpScancode(event.first);
             freerdp_input_send_keyboard_event_ex(instance_->context->input, event.down, event.repeat, scan);
         } else {
             freerdp_input_send_mouse_event(instance_->context->input, static_cast<UINT16>(event.first), event.x, event.y);

@@ -14,6 +14,7 @@ The application currently provides the Phase 1 connection window, password/NLA
 authentication, Microsoft Entra web-account authentication, certificate prompts,
 basic desktop rendering, keyboard and mouse input, local framebuffer scaling,
 connection error handling, and clean session shutdown.
+Successful connection details can also be selected from a recent-session list.
 
 Microsoft Entra authentication supports environments that require phone/passkey
 QR authentication. An initial real sign-in using that flow succeeded on
@@ -130,6 +131,17 @@ Implemented Phase 1 graphics/input behavior includes:
 - US keyboard letters, digits, navigation, function keys, modifiers, and OEM
   punctuation mappings
 - explicit remote Shift synchronization and release on focus loss
+- explicit extended RDP scancodes for arrows and other navigation keys
+
+## Recent Sessions
+
+After a connection succeeds, OpenRDP records the server, username, and selected
+authentication mode in `~/.config/openrdp/history.json`. The **Previous session**
+selector restores those fields for another connection. Entries are deduplicated,
+most-recent-first, and limited to 20.
+
+Passwords, access tokens, authorization codes, and certificate decisions are never
+written to the history file. Failed connection attempts are not saved.
 
 Wayland compositors may intercept system shortcuts such as Alt+Tab or Super-key
 combinations before the application receives them.
@@ -187,6 +199,8 @@ reported:
 Covered unit logic includes server/port parsing, username/domain parsing, mouse
 coordinate scaling, keyboard/OEM mappings, concrete modifier scancodes, error
 translation, and strict Microsoft authorization-redirect parsing.
+The suite also verifies extended navigation-key scancodes and recent-session
+serialization, ordering, deduplication, and exclusion of password/token fields.
 
 ## Interoperability Status
 
@@ -258,4 +272,3 @@ src/
 - [Architecture](architecture.md)
 - [Build instructions](building.md)
 - [Phase 1 testing](phase1-testing.md)
-
