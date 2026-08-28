@@ -21,9 +21,12 @@ std::uint32_t qtKeyToVirtualKey(const Qt::Key key)
     case Qt::Key_Backspace: return VK_BACK;
     case Qt::Key_Tab: return VK_TAB;
     case Qt::Key_Return: case Qt::Key_Enter: return VK_RETURN;
-    case Qt::Key_Shift: return VK_SHIFT;
-    case Qt::Key_Control: return VK_CONTROL;
-    case Qt::Key_Alt: return VK_MENU;
+    // Qt does not expose left/right in Qt::Key. Use the left-side Windows
+    // virtual keys as the reliable Phase 1 baseline; WinPR maps these to
+    // concrete scancodes whereas the generic modifier VKs are ambiguous.
+    case Qt::Key_Shift: return VK_LSHIFT;
+    case Qt::Key_Control: return VK_LCONTROL;
+    case Qt::Key_Alt: return VK_LMENU;
     case Qt::Key_CapsLock: return VK_CAPITAL;
     case Qt::Key_Escape: return VK_ESCAPE;
     case Qt::Key_Space: return VK_SPACE;

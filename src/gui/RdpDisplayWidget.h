@@ -13,5 +13,7 @@ protected:
     void wheelEvent(QWheelEvent*) override; void keyPressEvent(QKeyEvent*) override;
     void keyReleaseEvent(QKeyEvent*) override; void focusOutEvent(QFocusEvent*) override;
 private: QPoint remotePoint(const QPointF&) const; QImage frame_;
+    void setRemoteShift(bool down);
+    bool remoteShiftDown_ = false;
 };
 }
