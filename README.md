@@ -1,5 +1,8 @@
 # OpenRDP Client
 
+See [docs/current-build.md](docs/current-build.md) for the consolidated build,
+architecture, authentication, environment, test-status, and limitation report.
+
 OpenRDP is a native C++20/Qt 6 Remote Desktop client which embeds FreeRDP 3.
 It never launches `xfreerdp` or another RDP process. This repository currently
 contains the Phase 1 core client and does not claim MSTSC parity.
