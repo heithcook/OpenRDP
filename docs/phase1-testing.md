@@ -44,6 +44,9 @@ environment. These entries intentionally remain `NOT TESTED`.
 
 - Real NLA/TLS connection and desktop rendering: PASS (user-observed on 2026-08-27).
 - Basic letters and numbers: PASS.
-- Symbols/punctuation: FAIL in the initial build; OEM-key mapping fix pending retest.
+- Unshifted punctuation: PASS after OEM-key mapping fix.
+- Shifted symbols: FAIL in first retest because Shift remained pressed; explicit modifier-state fix pending retest.
+- Microsoft Entra web authentication with phone/passkey QR: initial PASS on 2026-08-27;
+  broader repeat, cancellation, and failure-path testing remains required.
 
 Phase 1 is therefore not declared complete.

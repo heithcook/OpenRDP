@@ -12,6 +12,17 @@ responses wake the worker directly through small thread-safe response methods.
 Cancellation wakes the same condition, preventing shutdown hangs while a
 dialog decision is pending.
 
+Authentication is an explicit per-connection mode. `NlaPassword` enables TLS
+and NLA and uses `AuthenticateEx`. `EntraWebAccount` disables the competing
+NLA/TLS security selectors, enables FreeRDP AAD security, and uses
+`GetAccessToken`. The GUI launches a dedicated Chromium process with an ephemeral
+profile and a loopback-only DevTools endpoint. This preserves Chromium's native
+phone/passkey QR support. OpenRDP polls only that private browser's target metadata,
+accepts only the expected HTTPS Microsoft native-client callback, extracts its
+one-time code in memory, shuts down Chromium, removes the temporary profile, and
+delegates the token exchange to FreeRDP. No token is copied, emitted through a Qt
+signal, or persisted by OpenRDP.
+
 After connection, FreeRDP software GDI decodes protocol graphics into a BGRA32
 primary buffer. `EndPaint` copies a stable `QImage` snapshot and emits it to the
 GUI. The display widget scales that image during painting. This correctness-

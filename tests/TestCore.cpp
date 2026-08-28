@@ -1,6 +1,7 @@
 #include <QtTest>
 #include "rdp/RdpInput.h"
 #include "rdp/RdpSettings.h"
+#include <winpr/input.h>
 
 class TestCore final : public QObject {
     Q_OBJECT
@@ -38,6 +39,26 @@ private slots:
         QVERIFY(openrdp::qtKeyToVirtualKey(Qt::Key_Less) != 0);
         QVERIFY(openrdp::qtKeyToVirtualKey(Qt::Key_Question) != 0);
         QVERIFY(openrdp::qtKeyToVirtualKey(Qt::Key_AsciiTilde) != 0);
+    }
+    void modifierScancodes() {
+        const auto shift = openrdp::qtKeyToVirtualKey(Qt::Key_Shift);
+        const auto control = openrdp::qtKeyToVirtualKey(Qt::Key_Control);
+        const auto alt = openrdp::qtKeyToVirtualKey(Qt::Key_Alt);
+        QCOMPARE(shift, static_cast<std::uint32_t>(VK_LSHIFT));
+        QCOMPARE(control, static_cast<std::uint32_t>(VK_LCONTROL));
+        QCOMPARE(alt, static_cast<std::uint32_t>(VK_LMENU));
+        QVERIFY(GetVirtualScanCodeFromVirtualKeyCode(shift, 4) != 0);
+        QVERIFY(GetVirtualScanCodeFromVirtualKeyCode(control, 4) != 0);
+        QVERIFY(GetVirtualScanCodeFromVirtualKeyCode(alt, 4) != 0);
+    }
+    void aadRedirectParsing() {
+        const auto code = openrdp::authorizationCodeFromRedirect(
+            QStringLiteral("https://login.microsoftonline.com/common/oauth2/nativeclient?code=abc%2B123&session_state=x"));
+        QVERIFY(code); QCOMPARE(*code, QStringLiteral("abc+123"));
+        QVERIFY(!openrdp::authorizationCodeFromRedirect(QStringLiteral("http://example.test/?code=secret")));
+        QVERIFY(!openrdp::authorizationCodeFromRedirect(QStringLiteral("https://login.microsoftonline.com/")));
+        QVERIFY(!openrdp::authorizationCodeFromRedirect(QStringLiteral("https://login.microsoftonline.com/?error=access_denied")));
+        QVERIFY(!openrdp::authorizationCodeFromRedirect(QStringLiteral("https://example.test/common/oauth2/nativeclient?code=secret")));
     }
 };
 QTEST_MAIN(TestCore)

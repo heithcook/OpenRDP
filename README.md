@@ -14,6 +14,7 @@ Built and automatically tested:
 - Worker-thread connection/event loop
 - NLA/TLS secure defaults
 - In-memory credential prompt
+- Per-connection normal NLA/password or Microsoft Entra web-account mode
 - Per-connection certificate prompt
 - FreeRDP software-GDI framebuffer display
 - Mouse and scancode input paths
@@ -25,6 +26,7 @@ Awaiting real Windows interoperability testing (not marked complete):
 - Authentication, certificate, rendering, keyboard, and mouse behavior
 - Ten connection cycles and network-loss behavior
 - Interactive ASAN/UBSAN session testing
+- Microsoft Entra web-account authorization and token exchange
 
 Not implemented in Phase 1: clipboard, audio, microphone, drives, printers,
 smart cards, multiple monitors, dynamic resolution, RD Gateway, RemoteApp,
@@ -52,6 +54,14 @@ ctest --test-dir build --output-on-failure
 The GUI also accepts `openrdp server01`, `openrdp -v server01`, and
 `openrdp -u 'CONTOSO\user'`. There is deliberately no password command-line
 option.
+
+Normal password/NLA authentication is the default. Select “Use a web account
+to sign in to the remote computer” only for an Entra/AAD-enabled RDP target.
+The installed FreeRDP library must have `WITH_AAD=ON`. OpenRDP launches a dedicated
+private Chromium session so Microsoft's complete phone/passkey QR experience remains
+available. It observes the browser's loopback-only debugging endpoint and intercepts
+the native-client redirect internally. The temporary profile is deleted after sign-in;
+authorization codes and access tokens are never copied to the clipboard or saved.
 
 ## Known Phase 1 limitations
 

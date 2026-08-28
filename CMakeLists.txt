@@ -9,7 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Test)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Network Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FREERDP REQUIRED IMPORTED_TARGET freerdp3 freerdp-client3 winpr3)
 
@@ -32,7 +32,7 @@ add_executable(openrdp
     src/rdp/RdpRenderer.cpp
 )
 target_include_directories(openrdp PRIVATE src)
-target_link_libraries(openrdp PRIVATE openrdp_core Qt6::Gui Qt6::Widgets)
+target_link_libraries(openrdp PRIVATE openrdp_core Qt6::Gui Qt6::Widgets Qt6::Network)
 
 foreach(target openrdp openrdp_core)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wformat=2 -Wformat-security)

@@ -1,6 +1,7 @@
 #include "rdp/RdpSettings.h"
 
 #include <QUrl>
+#include <QUrlQuery>
 
 namespace openrdp {
 
@@ -36,6 +37,17 @@ void parseUsername(const QString& value, QString& username, QString& domain)
         domain.clear();
         username = value;
     }
+}
+
+std::optional<QString> authorizationCodeFromRedirect(const QString& redirectUrl)
+{
+    const QUrl url(redirectUrl, QUrl::StrictMode);
+    if (!url.isValid() || url.scheme() != QStringLiteral("https")) return std::nullopt;
+    if (url.host().compare(QStringLiteral("login.microsoftonline.com"), Qt::CaseInsensitive) != 0 ||
+        url.path() != QStringLiteral("/common/oauth2/nativeclient")) return std::nullopt;
+    const QString code = QUrlQuery(url).queryItemValue(QStringLiteral("code"), QUrl::FullyDecoded);
+    if (code.isEmpty()) return std::nullopt;
+    return code;
 }
 
 } // namespace openrdp

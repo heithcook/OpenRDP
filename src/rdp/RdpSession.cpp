@@ -3,6 +3,8 @@
 #include "rdp/RdpInput.h"
 
 #include <QMutexLocker>
+#include <QUrl>
+#include <freerdp/client.h>
 #include <freerdp/freerdp.h>
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/input.h>
@@ -12,6 +14,7 @@
 #include <winpr/synch.h>
 #include <winpr/input.h>
 #include <array>
+#include <cstdarg>
 
 namespace openrdp {
 namespace {
@@ -44,6 +47,7 @@ void RdpSession::connectToServer(const ConnectionSettings& settings)
     instance_->PostDisconnect = &RdpSession::postDisconnect;
     instance_->AuthenticateEx = &RdpSession::authenticate;
     instance_->VerifyCertificateEx = &RdpSession::verifyCertificate;
+    instance_->GetAccessToken = &RdpSession::getAccessToken;
     if (!freerdp_context_new(instance_)) {
         emit connectionError({RdpErrorType::InternalError, QStringLiteral("The RDP context could not be created."), {}, 0});
         cleanup(); setState(SessionState::Failed); return;
@@ -60,8 +64,9 @@ void RdpSession::connectToServer(const ConnectionSettings& settings)
         freerdp_settings_set_uint32(s, FreeRDP_DesktopWidth, settings.desktopWidth) &&
         freerdp_settings_set_uint32(s, FreeRDP_DesktopHeight, settings.desktopHeight) &&
         freerdp_settings_set_uint32(s, FreeRDP_ColorDepth, 32) &&
-        freerdp_settings_set_bool(s, FreeRDP_NlaSecurity, settings.enableNla) &&
-        freerdp_settings_set_bool(s, FreeRDP_TlsSecurity, settings.enableTls) &&
+        freerdp_settings_set_bool(s, FreeRDP_AadSecurity, settings.authenticationMode == AuthenticationMode::EntraWebAccount) &&
+        freerdp_settings_set_bool(s, FreeRDP_NlaSecurity, settings.authenticationMode == AuthenticationMode::NlaPassword && settings.enableNla) &&
+        freerdp_settings_set_bool(s, FreeRDP_TlsSecurity, settings.authenticationMode == AuthenticationMode::NlaPassword && settings.enableTls) &&
         freerdp_settings_set_bool(s, FreeRDP_RdpSecurity, false) &&
         freerdp_settings_set_bool(s, FreeRDP_SoftwareGdi, true);
     if (!configured || !freerdp_connect(instance_)) {
@@ -182,6 +187,72 @@ DWORD RdpSession::awaitCertificate(const CertificateInfo& info)
 }
 void RdpSession::provideCertificateDecision(const bool accepted)
 { QMutexLocker lock(&responseMutex_); responseAccepted_ = accepted; responsePending_ = false; responseReady_.wakeAll(); }
+
+BOOL RdpSession::getAccessToken(freerdp* instance, const AccessTokenType type, char** token,
+    const size_t count, ...)
+{
+    try {
+        if (!instance || !instance->context || !token || type != ACCESS_TOKEN_TYPE_AAD || count < 2)
+            return FALSE;
+        va_list args;
+        va_start(args, count);
+        const char* scope = va_arg(args, const char*);
+        const char* reqCnf = va_arg(args, const char*);
+        va_end(args);
+        if (!scope || !reqCnf) return FALSE;
+
+        auto* self = session(instance);
+        if (!self) return FALSE;
+        auto* freerdpSettings = instance->context->settings;
+        const BOOL previous = freerdp_settings_get_bool(freerdpSettings, FreeRDP_UseCommonStdioCallbacks);
+        if (!freerdp_settings_set_bool(freerdpSettings, FreeRDP_UseCommonStdioCallbacks, TRUE)) return FALSE;
+        char* request = freerdp_client_get_aad_url(
+            reinterpret_cast<rdpClientContext*>(instance->context),
+            FREERDP_CLIENT_AAD_AUTH_REQUEST, scope);
+        (void)freerdp_settings_set_bool(freerdpSettings, FreeRDP_UseCommonStdioCallbacks, previous);
+        if (!request) return FALSE;
+        const QString authorizationUrl = QString::fromUtf8(request);
+        free(request);
+
+        QString redirectUrl;
+        if (!self->awaitWebAuthentication(authorizationUrl, redirectUrl)) return FALSE;
+        const auto code = authorizationCodeFromRedirect(redirectUrl);
+        if (!code) return FALSE;
+        const QByteArray codeBytes = code->toUtf8();
+
+        if (!freerdp_settings_set_bool(freerdpSettings, FreeRDP_UseCommonStdioCallbacks, TRUE)) return FALSE;
+        char* tokenRequest = freerdp_client_get_aad_url(
+            reinterpret_cast<rdpClientContext*>(instance->context),
+            FREERDP_CLIENT_AAD_TOKEN_REQUEST, scope, codeBytes.constData(), reqCnf);
+        (void)freerdp_settings_set_bool(freerdpSettings, FreeRDP_UseCommonStdioCallbacks, previous);
+        if (!tokenRequest) return FALSE;
+        const BOOL result = client_common_get_access_token(instance, tokenRequest, token);
+        free(tokenRequest);
+        return result && *token;
+    } catch (...) { return FALSE; }
+}
+
+bool RdpSession::awaitWebAuthentication(const QString& authorizationUrl, QString& redirectUrl)
+{
+    setState(SessionState::Authenticating);
+    { QMutexLocker lock(&responseMutex_); responsePending_ = true; responseAccepted_ = false; responseRedirectUrl_.clear(); }
+    emit webAuthenticationRequired(authorizationUrl);
+    QMutexLocker lock(&responseMutex_);
+    while (responsePending_ && !cancelRequested_) responseReady_.wait(&responseMutex_);
+    if (!responseAccepted_ || cancelRequested_) return false;
+    redirectUrl = responseRedirectUrl_;
+    responseRedirectUrl_.clear();
+    return !redirectUrl.isEmpty();
+}
+
+void RdpSession::provideWebAuthenticationResult(const QString& redirectUrl, const bool accepted)
+{
+    QMutexLocker lock(&responseMutex_);
+    responseRedirectUrl_ = redirectUrl;
+    responseAccepted_ = accepted;
+    responsePending_ = false;
+    responseReady_.wakeAll();
+}
 
 QImage RdpSession::currentFrame() const
 {

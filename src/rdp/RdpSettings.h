@@ -6,6 +6,8 @@
 
 namespace openrdp {
 
+enum class AuthenticationMode { NlaPassword, EntraWebAccount };
+
 struct ConnectionSettings {
     QString hostname;
     quint16 port = 3389;
@@ -15,6 +17,7 @@ struct ConnectionSettings {
     int desktopHeight = 1080;
     bool enableNla = true;
     bool enableTls = true;
+    AuthenticationMode authenticationMode = AuthenticationMode::NlaPassword;
 };
 
 struct ParsedServer {
@@ -24,5 +27,6 @@ struct ParsedServer {
 
 std::optional<ParsedServer> parseServer(const QString& value, QString* error = nullptr);
 void parseUsername(const QString& value, QString& username, QString& domain);
+std::optional<QString> authorizationCodeFromRedirect(const QString& redirectUrl);
 
 } // namespace openrdp

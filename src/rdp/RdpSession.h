@@ -43,6 +43,7 @@ public slots:
     void disconnect();
     void provideCredentials(const QString& username, const QString& password, bool accepted);
     void provideCertificateDecision(bool accepted);
+    void provideWebAuthenticationResult(const QString& redirectUrl, bool accepted);
     void sendMouse(quint16 flags, quint16 x, quint16 y);
     void sendKey(quint32 virtualKey, bool down, bool repeat);
 
@@ -52,6 +53,7 @@ signals:
     void disconnected();
     void authenticationRequired(QString server, QString username);
     void certificateVerificationRequired(CertificateInfo certificate);
+    void webAuthenticationRequired(QString authorizationUrl);
     void frameUpdated(QImage frame, QRect damage);
     void connectionError(RdpError error);
 
@@ -63,10 +65,13 @@ private:
     static DWORD verifyCertificate(freerdp* instance, const char* host, UINT16 port,
         const char* commonName, const char* subject, const char* issuer, const char* fingerprint,
         DWORD flags);
+    static BOOL getAccessToken(freerdp* instance, AccessTokenType type, char** token,
+        size_t count, ...);
     static BOOL beginPaint(rdpContext* context);
     static BOOL endPaint(rdpContext* context);
     bool awaitCredentials(char** username, char** password, char** domain);
     DWORD awaitCertificate(const CertificateInfo& info);
+    bool awaitWebAuthentication(const QString& authorizationUrl, QString& redirectUrl);
     void setState(SessionState state);
     void cleanup();
     void flushInput();
@@ -82,6 +87,7 @@ private:
     bool responseAccepted_ = false;
     QString responseUsername_;
     QString responsePassword_;
+    QString responseRedirectUrl_;
     struct InputEvent { bool key; quint32 first; quint16 x; quint16 y; bool down; bool repeat; };
     QMutex inputMutex_;
     QVector<InputEvent> inputEvents_;
