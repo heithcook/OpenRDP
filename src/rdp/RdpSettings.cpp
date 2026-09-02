@@ -50,4 +50,9 @@ std::optional<QString> authorizationCodeFromRedirect(const QString& redirectUrl)
     return code;
 }
 
+QSize constrainedDisplaySize(const QSize& requested)
+{
+    return {qBound(200, requested.width(), 8192), qBound(200, requested.height(), 8192)};
+}
+
 } // namespace openrdp

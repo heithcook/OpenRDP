@@ -1,10 +1,19 @@
 #include "rdp/RdpSession.h"
 #include "rdp/RdpContext.h"
 #include "rdp/RdpInput.h"
+#include "channels/ClipboardText.h"
 
 #include <QMutexLocker>
 #include <QUrl>
+#include <freerdp/addin.h>
 #include <freerdp/client.h>
+#include <freerdp/client/channels.h>
+#include <freerdp/client/cmdline.h>
+#include <freerdp/client/disp.h>
+#include <freerdp/client/cliprdr.h>
+#include <freerdp/channels/disp.h>
+#include <freerdp/channels/cliprdr.h>
+#include <freerdp/event.h>
 #include <freerdp/freerdp.h>
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/input.h>
@@ -13,8 +22,11 @@
 #include <winpr/crt.h>
 #include <winpr/synch.h>
 #include <winpr/input.h>
+#include <winpr/collections.h>
+#include <winpr/user.h>
 #include <array>
 #include <cstdarg>
+#include <cstring>
 
 namespace openrdp {
 namespace {
@@ -45,6 +57,7 @@ void RdpSession::connectToServer(const ConnectionSettings& settings)
     instance_->PreConnect = &RdpSession::preConnect;
     instance_->PostConnect = &RdpSession::postConnect;
     instance_->PostDisconnect = &RdpSession::postDisconnect;
+    instance_->LoadChannels = &RdpSession::loadChannels;
     instance_->AuthenticateEx = &RdpSession::authenticate;
     instance_->VerifyCertificateEx = &RdpSession::verifyCertificate;
     instance_->GetAccessToken = &RdpSession::getAccessToken;
@@ -64,14 +77,38 @@ void RdpSession::connectToServer(const ConnectionSettings& settings)
         freerdp_settings_set_uint32(s, FreeRDP_DesktopWidth, settings.desktopWidth) &&
         freerdp_settings_set_uint32(s, FreeRDP_DesktopHeight, settings.desktopHeight) &&
         freerdp_settings_set_uint32(s, FreeRDP_ColorDepth, 32) &&
+        freerdp_settings_set_bool(s, FreeRDP_DynamicResolutionUpdate, settings.dynamicResolution) &&
+        freerdp_settings_set_bool(s, FreeRDP_SupportDisplayControl, settings.dynamicResolution) &&
+        freerdp_settings_set_bool(s, FreeRDP_RedirectClipboard, settings.clipboard) &&
+        freerdp_settings_set_bool(s, FreeRDP_AudioPlayback, settings.audio.output == RemoteAudioMode::Local) &&
+        freerdp_settings_set_bool(s, FreeRDP_RemoteConsoleAudio, settings.audio.output == RemoteAudioMode::Remote) &&
+        freerdp_settings_set_bool(s, FreeRDP_AudioCapture, settings.audio.microphone) &&
+        freerdp_settings_set_bool(s, FreeRDP_DeviceRedirection, !settings.folders.isEmpty()||!settings.printers.isEmpty()) &&
+        freerdp_settings_set_bool(s, FreeRDP_RedirectDrives, false) &&
+        freerdp_settings_set_bool(s, FreeRDP_RedirectHomeDrive, false) &&
         freerdp_settings_set_bool(s, FreeRDP_AadSecurity, settings.authenticationMode == AuthenticationMode::EntraWebAccount) &&
         freerdp_settings_set_bool(s, FreeRDP_NlaSecurity, settings.authenticationMode == AuthenticationMode::NlaPassword && settings.enableNla) &&
         freerdp_settings_set_bool(s, FreeRDP_TlsSecurity, settings.authenticationMode == AuthenticationMode::NlaPassword && settings.enableTls) &&
         freerdp_settings_set_bool(s, FreeRDP_RdpSecurity, false) &&
         freerdp_settings_set_bool(s, FreeRDP_SoftwareGdi, true);
-    if (!configured || !freerdp_connect(instance_)) {
+    bool monitorsConfigured = true;
+    if (settings.monitors.size() > 1) {
+        const auto monitors = toFreeRdpMonitors(settings.monitors);
+        monitorsConfigured = !monitors.isEmpty() &&
+            freerdp_settings_set_bool(s, FreeRDP_UseMultimon, true) &&
+            freerdp_settings_set_bool(s, FreeRDP_ForceMultimon, false) &&
+            freerdp_settings_set_monitor_def_array_sorted(s, monitors.constData(), static_cast<size_t>(monitors.size()));
+    }
+    if (!configured || !monitorsConfigured || !freerdp_connect(instance_)) {
         const auto error = translateError(freerdp_get_last_error(instance_->context), settings.hostname, settings.port);
         cleanup(); setState(SessionState::Failed); emit connectionError(error); emit disconnected(); return;
+    }
+    if (settings.clipboard) {
+        auto* clip = static_cast<CliprdrClientContext*>(freerdp_channels_get_static_channel_interface(
+            instance_->context->channels, CLIPRDR_SVC_CHANNEL_NAME));
+        if (clip) {
+            bindClipboardContext(clip);
+        }
     }
     setState(SessionState::Connected);
     emit connected({settings.desktopWidth, settings.desktopHeight});
@@ -83,6 +120,8 @@ void RdpSession::connectToServer(const ConnectionSettings& settings)
         const DWORD status = WaitForMultipleObjects(count, handles.data(), FALSE, 100);
         if (status == WAIT_FAILED || (status != WAIT_TIMEOUT && !freerdp_check_event_handles(instance_->context))) break;
         flushInput();
+        flushDisplayResize();
+        flushClipboard();
     }
     setState(SessionState::Disconnecting);
     if (instance_) freerdp_disconnect(instance_);
@@ -104,22 +143,186 @@ void RdpSession::cleanup()
 {
     QMutexLocker instanceLock(&instanceMutex_);
     if (!instance_) return;
+    { QMutexLocker displayLock(&displayMutex_); displayControl_ = nullptr; displayControlActive_ = false; pendingDisplaySize_ = {}; }
+    { QMutexLocker clipboardLock(&clipboardMutex_); clipboardContext_ = nullptr; localClipboardText_.clear(); clipboardDirty_=false; clipboardHandshakeStarted_=false; clipboardServerReady_=false; }
     if (instance_->context) renderer_.shutdown(instance_->context);
     freerdp_context_free(instance_);
     freerdp_free(instance_);
     instance_ = nullptr;
 }
 
-BOOL RdpSession::preConnect(freerdp*) { return TRUE; }
+BOOL RdpSession::preConnect(freerdp* instance)
+{
+    if (!instance || !instance->context || !instance->context->settings || !instance->context->channels)
+        return FALSE;
+    // FreeRDP initializes its channel manager immediately before PreConnect.
+    // Subscribe here so the registrations survive that initialization and are
+    // present before any static or dynamic channel is loaded.
+    if (PubSub_SubscribeChannelConnected(instance->context->pubSub, &RdpSession::channelConnected) < 0 ||
+        PubSub_SubscribeChannelDisconnected(instance->context->pubSub, &RdpSession::channelDisconnected) < 0)
+        return FALSE;
+    // freerdp_new()/freerdp_context_new() do not install the client-common
+    // static add-in provider. Without it, distro builds with channels linked
+    // into libfreerdp-client (rather than separate plugin .so files) cannot
+    // resolve cliprdr, rdpdr, rdpsnd, audin, or disp during pre-connect.
+    if (freerdp_register_addin_provider(freerdp_channels_load_static_addin_entry, 0) != CHANNEL_RC_OK)
+        return FALSE;
+    if (freerdp_settings_get_bool(instance->context->settings, FreeRDP_DynamicResolutionUpdate)) {
+        const char* channel[] = { DISP_CHANNEL_NAME };
+        if (!freerdp_client_add_dynamic_channel(instance->context->settings, 1, channel)) return FALSE;
+    }
+    if (freerdp_settings_get_bool(instance->context->settings, FreeRDP_RedirectClipboard)) {
+        const char* channel[] = { CLIPRDR_CHANNEL_NAME };
+        if (!freerdp_client_add_static_channel(instance->context->settings, 1, channel)) return FALSE;
+    }
+    auto* self=session(instance);
+    if(!self)return FALSE;
+    const auto sound=rdpsndArguments(self->settings_.audio);
+    if(!sound.isEmpty()){QVector<const char*> args;for(const auto& value:sound)args.append(value.constData());if(!freerdp_client_add_static_channel(instance->context->settings,static_cast<size_t>(args.size()),args.constData()))return FALSE;}
+    const auto microphone=audinArguments(self->settings_.audio);
+    if(!microphone.isEmpty()){QVector<const char*> args;for(const auto& value:microphone)args.append(value.constData());if(!freerdp_client_add_dynamic_channel(instance->context->settings,static_cast<size_t>(args.size()),args.constData()))return FALSE;}
+    if(!uniqueFolderNames(self->settings_.folders))return FALSE;
+    for(const auto& folder:self->settings_.folders){const auto values=driveArguments(folder);QVector<const char*> args;for(const auto& value:values)args.append(value.constData());if(!freerdp_client_add_device_channel(instance->context->settings,static_cast<size_t>(args.size()),args.constData()))return FALSE;}
+    if(!uniquePrinters(self->settings_.printers))return FALSE;
+    for(const auto& printer:self->settings_.printers){const auto values=printerArguments(printer);QVector<const char*> args;for(const auto& value:values)args.append(value.constData());if(!freerdp_client_add_device_channel(instance->context->settings,static_cast<size_t>(args.size()),args.constData()))return FALSE;}
+    return TRUE;
+}
+BOOL RdpSession::loadChannels(freerdp* instance)
+{
+    if (!instance || !instance->context || !instance->context->settings) return FALSE;
+    return freerdp_client_load_channels(instance);
+}
 BOOL RdpSession::postConnect(freerdp* instance)
 {
     auto* self = session(instance);
     if (!self || !self->renderer_.initialize(instance->context)) return FALSE;
     instance->context->update->BeginPaint = &RdpSession::beginPaint;
     instance->context->update->EndPaint = &RdpSession::endPaint;
+    instance->context->update->DesktopResize = &RdpSession::desktopResize;
     return TRUE;
 }
 void RdpSession::postDisconnect(freerdp*) {}
+void RdpSession::channelConnected(void* context, const ChannelConnectedEventArgs* event)
+{
+    if (!context || !event || !event->name || !event->pInterface) return;
+    auto* rdp = static_cast<rdpContext*>(context);
+    auto* self = session(rdp->instance);
+    if (!self) return;
+    if (std::strcmp(event->name, CLIPRDR_CHANNEL_NAME) == 0) {
+        self->bindClipboardContext(static_cast<CliprdrClientContext*>(event->pInterface));
+        return;
+    }
+    if (std::strcmp(event->name, DISP_DVC_CHANNEL_NAME) != 0 && std::strcmp(event->name, DISP_CHANNEL_NAME) != 0) return;
+    QMutexLocker lock(&self->displayMutex_);
+    self->displayControl_ = static_cast<DispClientContext*>(event->pInterface);
+    self->displayControl_->custom = self;
+    self->displayControl_->DisplayControlCaps = &RdpSession::displayControlCaps;
+}
+void RdpSession::bindClipboardContext(CliprdrClientContext* clip)
+{
+    if (!clip) return;
+    QMutexLocker lock(&clipboardMutex_);
+    clipboardContext_=clip;
+    clip->custom=this;
+    clip->MonitorReady=&RdpSession::clipboardMonitorReady;
+    clip->ServerCapabilities=&RdpSession::clipboardServerCapabilities;
+    clip->ServerFormatList=&RdpSession::clipboardServerFormatList;
+    clip->ServerFormatListResponse=&RdpSession::clipboardServerFormatListResponse;
+    clip->ServerFormatDataRequest=&RdpSession::clipboardServerDataRequest;
+    clip->ServerFormatDataResponse=&RdpSession::clipboardServerDataResponse;
+}
+void RdpSession::channelDisconnected(void* context, const ChannelDisconnectedEventArgs* event)
+{
+    if (!context || !event || !event->name) return;
+    auto* rdp = static_cast<rdpContext*>(context);
+    auto* self = session(rdp->instance);
+    if (!self) return;
+    if(std::strcmp(event->name,CLIPRDR_CHANNEL_NAME)==0){QMutexLocker lock(&self->clipboardMutex_);self->clipboardContext_=nullptr;return;}
+    if (std::strcmp(event->name, DISP_DVC_CHANNEL_NAME) != 0 && std::strcmp(event->name, DISP_CHANNEL_NAME) != 0) return;
+    QMutexLocker lock(&self->displayMutex_);
+    self->displayControl_ = nullptr; self->displayControlActive_ = false;
+}
+UINT RdpSession::displayControlCaps(DispClientContext* context, UINT32, UINT32, UINT32)
+{
+    if (!context || !context->custom) return CHANNEL_RC_INVALID_INSTANCE;
+    auto* self = static_cast<RdpSession*>(context->custom);
+    QMutexLocker lock(&self->displayMutex_);
+    self->displayControlActive_ = true;
+    return CHANNEL_RC_OK;
+}
+UINT RdpSession::clipboardMonitorReady(CliprdrClientContext* context,const CLIPRDR_MONITOR_READY*)
+{
+    if(!context||!context->custom||!context->ClientCapabilities||!context->ClientFormatList)
+        return CHANNEL_RC_INVALID_INSTANCE;
+    auto* self=static_cast<RdpSession*>(context->custom);
+    {
+        QMutexLocker lock(&self->clipboardMutex_);
+        if(self->clipboardHandshakeStarted_)return CHANNEL_RC_OK;
+        self->clipboardHandshakeStarted_=true;
+    }
+
+    // Capabilities must precede the first format list. Windows may ignore a
+    // client's advertised formats when this part of the CLIPRDR handshake is
+    // omitted.
+    CLIPRDR_GENERAL_CAPABILITY_SET general{};
+    general.capabilitySetType=CB_CAPSTYPE_GENERAL;
+    general.capabilitySetLength=CB_CAPSTYPE_GENERAL_LEN;
+    general.version=CB_CAPS_VERSION_2;
+    general.generalFlags=CB_USE_LONG_FORMAT_NAMES;
+    CLIPRDR_CAPABILITIES capabilities{};
+    capabilities.cCapabilitiesSets=1;
+    capabilities.capabilitySets=reinterpret_cast<CLIPRDR_CAPABILITY_SET*>(&general);
+    const UINT capabilityResult=context->ClientCapabilities(context,&capabilities);
+    if(capabilityResult!=CHANNEL_RC_OK)return capabilityResult;
+
+    CLIPRDR_FORMAT format{CF_UNICODETEXT,nullptr};CLIPRDR_FORMAT_LIST list{};list.common.msgType=CB_FORMAT_LIST;list.numFormats=1;list.formats=&format;
+    const UINT formatResult=context->ClientFormatList(context,&list);
+    return formatResult;
+}
+UINT RdpSession::clipboardServerCapabilities(CliprdrClientContext* context,const CLIPRDR_CAPABILITIES* capabilities)
+{
+    if(!context||!context->custom||!capabilities)return CHANNEL_RC_INVALID_INSTANCE;
+    auto* self=static_cast<RdpSession*>(context->custom);
+    {
+        QMutexLocker lock(&self->clipboardMutex_);
+        self->clipboardServerReady_=true;
+        // The channel can connect after the server's Monitor Ready PDU has
+        // already passed. Start the client half of the handshake here, once
+        // the server capabilities are known, instead of advertising formats
+        // prematurely from PostConnect.
+        self->clipboardHandshakeStarted_=false;
+    }
+    return clipboardMonitorReady(context,nullptr);
+}
+UINT RdpSession::clipboardServerFormatList(CliprdrClientContext* context,const CLIPRDR_FORMAT_LIST* list)
+{
+    if(!context||!context->custom||!list)return CHANNEL_RC_INVALID_INSTANCE;
+    CLIPRDR_FORMAT_LIST_RESPONSE response{};response.common.msgType=CB_FORMAT_LIST_RESPONSE;response.common.msgFlags=CB_RESPONSE_OK;
+    UINT result=context->ClientFormatListResponse?context->ClientFormatListResponse(context,&response):CHANNEL_RC_OK;
+    bool unicode=false;for(UINT32 i=0;i<list->numFormats;++i)if(list->formats[i].formatId==CF_UNICODETEXT){unicode=true;break;}
+    if(unicode&&context->ClientFormatDataRequest){CLIPRDR_FORMAT_DATA_REQUEST request{};request.common.msgType=CB_FORMAT_DATA_REQUEST;request.requestedFormatId=CF_UNICODETEXT;result=context->ClientFormatDataRequest(context,&request);}
+    return result;
+}
+UINT RdpSession::clipboardServerFormatListResponse(CliprdrClientContext* context,const CLIPRDR_FORMAT_LIST_RESPONSE* response)
+{
+    return context&&context->custom&&response?CHANNEL_RC_OK:CHANNEL_RC_INVALID_INSTANCE;
+}
+UINT RdpSession::clipboardServerDataRequest(CliprdrClientContext* context,const CLIPRDR_FORMAT_DATA_REQUEST* request)
+{
+    if(!context||!context->custom||!request||!context->ClientFormatDataResponse)return CHANNEL_RC_INVALID_INSTANCE;
+    auto* self=static_cast<RdpSession*>(context->custom);QString localText;
+    {QMutexLocker lock(&self->clipboardMutex_);localText=self->localClipboardText_;}
+    CLIPRDR_FORMAT_DATA_RESPONSE response{};response.common.msgType=CB_FORMAT_DATA_RESPONSE;
+    QByteArray data;if(request->requestedFormatId==CF_UNICODETEXT){data=encodeClipboardText(localText);response.common.msgFlags=CB_RESPONSE_OK;response.common.dataLen=static_cast<UINT32>(data.size());response.requestedFormatData=reinterpret_cast<const BYTE*>(data.constData());}else response.common.msgFlags=CB_RESPONSE_FAIL;
+    return context->ClientFormatDataResponse(context,&response);
+}
+UINT RdpSession::clipboardServerDataResponse(CliprdrClientContext* context,const CLIPRDR_FORMAT_DATA_RESPONSE* response)
+{
+    if(!context||!context->custom||!response||!(response->common.msgFlags&CB_RESPONSE_OK)||
+        (response->common.dataLen>0&&!response->requestedFormatData))return CHANNEL_RC_OK;
+    const QByteArray data(reinterpret_cast<const char*>(response->requestedFormatData),static_cast<qsizetype>(response->common.dataLen));
+    const auto text=decodeClipboardText(data);if(text)emit static_cast<RdpSession*>(context->custom)->remoteClipboardText(*text);return CHANNEL_RC_OK;
+}
 BOOL RdpSession::beginPaint(rdpContext*) { return TRUE; }
 BOOL RdpSession::endPaint(rdpContext* context)
 {
@@ -129,6 +332,17 @@ BOOL RdpSession::endPaint(rdpContext* context)
     const QImage frame(context->gdi->primary_buffer, context->gdi->width, context->gdi->height,
         context->gdi->stride, QImage::Format_ARGB32);
     emit self->frameUpdated(frame.copy(), damage);
+    return TRUE;
+}
+
+BOOL RdpSession::desktopResize(rdpContext* context)
+{
+    if (!context || !context->gdi || !context->settings) return FALSE;
+    const UINT32 width = freerdp_settings_get_uint32(context->settings, FreeRDP_DesktopWidth);
+    const UINT32 height = freerdp_settings_get_uint32(context->settings, FreeRDP_DesktopHeight);
+    if (!gdi_resize(context->gdi, width, height)) return FALSE;
+    auto* self = session(context->instance);
+    if (self) emit self->frameUpdated(QImage(), QRect());
     return TRUE;
 }
 
@@ -267,6 +481,35 @@ void RdpSession::sendKey(quint32 virtualKey, bool down, bool repeat)
 {
     if (virtualKey == 0) return;
     QMutexLocker lock(&inputMutex_); inputEvents_.append({true, virtualKey, 0, 0, down, repeat});
+}
+void RdpSession::requestDisplayResize(const QSize size)
+{
+    QMutexLocker lock(&displayMutex_);
+    pendingDisplaySize_ = constrainedDisplaySize(size);
+}
+void RdpSession::setLocalClipboardText(QString text)
+{
+    QMutexLocker lock(&clipboardMutex_);localClipboardText_=std::move(text);clipboardDirty_=true;
+}
+void RdpSession::flushClipboard()
+{
+    CliprdrClientContext* context=nullptr;
+    {QMutexLocker lock(&clipboardMutex_);if(!clipboardDirty_||!clipboardServerReady_||!clipboardContext_||!clipboardContext_->ClientFormatList)return;clipboardDirty_=false;context=clipboardContext_;}
+    CLIPRDR_FORMAT format{CF_UNICODETEXT,nullptr};CLIPRDR_FORMAT_LIST list{};list.common.msgType=CB_FORMAT_LIST;list.numFormats=1;list.formats=&format;
+    (void)context->ClientFormatList(context,&list);
+}
+void RdpSession::flushDisplayResize()
+{
+    QMutexLocker lock(&displayMutex_);
+    if (!displayControlActive_ || !displayControl_ || !displayControl_->SendMonitorLayout || pendingDisplaySize_.isEmpty()) return;
+    const QSize size = pendingDisplaySize_; pendingDisplaySize_ = {};
+    DISPLAY_CONTROL_MONITOR_LAYOUT layout{};
+    layout.Flags = DISPLAY_CONTROL_MONITOR_PRIMARY;
+    layout.Width = static_cast<UINT32>(size.width()); layout.Height = static_cast<UINT32>(size.height());
+    layout.PhysicalWidth = static_cast<UINT32>(qBound(10, qRound(size.width() / 96.0 * 25.4), 10000));
+    layout.PhysicalHeight = static_cast<UINT32>(qBound(10, qRound(size.height() / 96.0 * 25.4), 10000));
+    layout.Orientation = 0; layout.DesktopScaleFactor = 100; layout.DeviceScaleFactor = 100;
+    (void)displayControl_->SendMonitorLayout(displayControl_, 1, &layout);
 }
 void RdpSession::flushInput()
 {

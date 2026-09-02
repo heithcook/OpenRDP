@@ -1,7 +1,7 @@
 # OpenRDP Current Build Report
 
 Report date: 2026-08-28  
-Project version: 0.1.0 (Phase 1 development)  
+Project version: 0.2.0 (Phase 2 development)
 Source revision at report creation: `06c2b6c36804a8f74a0847474586303059b6009d`
 
 ## Summary
@@ -18,8 +18,8 @@ Successful connection details can also be selected from a recent-session list.
 
 Microsoft Entra authentication supports environments that require phone/passkey
 QR authentication. An initial real sign-in using that flow succeeded on
-2026-08-27. Phase 1 is still under interoperability and regression testing and
-must not yet be described as fully complete.
+2026-08-27. Phase 1 was accepted as complete by the user on 2026-08-28 after
+interactive testing and is now the regression baseline for Phase 2.
 
 ## Build Environment
 
@@ -224,8 +224,8 @@ Detailed evolving results belong in [phase1-testing.md](phase1-testing.md).
 
 ## Known Limitations and Required Follow-up
 
-- Phase 1 is not complete until every mandatory acceptance item is tested and
-  recorded.
+- Phase 1 is complete by user acceptance; granular interoperability evidence should
+  continue to be recorded during Phase 2 regression testing.
 - Dynamic server-side resolution changes are not implemented; resizing scales
   the existing framebuffer locally.
 - Multimonitor, clipboard, audio, microphone, drive/printer/smart-card

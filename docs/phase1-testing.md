@@ -1,6 +1,13 @@
 # Phase 1 test record
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
+
+## Completion decision
+
+Phase 1 was accepted as complete by the user on 2026-08-28 following interactive
+OpenRDP testing. This acceptance supersedes the earlier overall incomplete status.
+Rows below remain the historical evidence record: scenarios without a specifically
+recorded observation are not retroactively changed to PASS.
 
 ## Build environment
 
@@ -53,4 +60,5 @@ environment. These entries intentionally remain `NOT TESTED`.
 - Recent-session persistence: serialization, deduplication, ordering, and absence of
   password/token fields are covered by unit tests; live UI retest required.
 
-Phase 1 is therefore not declared complete.
+Phase 1 is complete by user acceptance. Unrecorded granular cases remain explicit so
+Phase 2 regression work does not turn an acceptance decision into fabricated evidence.

@@ -15,6 +15,9 @@
 #include <atomic>
 #include <memory>
 #include <freerdp/freerdp.h>
+#include <freerdp/client/disp.h>
+#include <freerdp/client/cliprdr.h>
+#include <freerdp/event.h>
 
 namespace openrdp {
 
@@ -46,6 +49,8 @@ public slots:
     void provideWebAuthenticationResult(const QString& redirectUrl, bool accepted);
     void sendMouse(quint16 flags, quint16 x, quint16 y);
     void sendKey(quint32 virtualKey, bool down, bool repeat);
+    void requestDisplayResize(QSize size);
+    void setLocalClipboardText(QString text);
 
 signals:
     void stateChanged(SessionState state);
@@ -56,9 +61,11 @@ signals:
     void webAuthenticationRequired(QString authorizationUrl);
     void frameUpdated(QImage frame, QRect damage);
     void connectionError(RdpError error);
+    void remoteClipboardText(QString text);
 
 private:
     static BOOL preConnect(freerdp* instance);
+    static BOOL loadChannels(freerdp* instance);
     static BOOL postConnect(freerdp* instance);
     static void postDisconnect(freerdp* instance);
     static BOOL authenticate(freerdp* instance, char** username, char** password, char** domain, rdp_auth_reason reason);
@@ -69,12 +76,26 @@ private:
         size_t count, ...);
     static BOOL beginPaint(rdpContext* context);
     static BOOL endPaint(rdpContext* context);
+    static BOOL desktopResize(rdpContext* context);
+    static void channelConnected(void* context, const ChannelConnectedEventArgs* event);
+    static void channelDisconnected(void* context, const ChannelDisconnectedEventArgs* event);
+    static UINT displayControlCaps(DispClientContext* context, UINT32 maxMonitors,
+        UINT32 maxAreaFactorA, UINT32 maxAreaFactorB);
+    static UINT clipboardMonitorReady(CliprdrClientContext*,const CLIPRDR_MONITOR_READY*);
+    static UINT clipboardServerCapabilities(CliprdrClientContext*,const CLIPRDR_CAPABILITIES*);
+    static UINT clipboardServerFormatList(CliprdrClientContext*,const CLIPRDR_FORMAT_LIST*);
+    static UINT clipboardServerFormatListResponse(CliprdrClientContext*,const CLIPRDR_FORMAT_LIST_RESPONSE*);
+    static UINT clipboardServerDataRequest(CliprdrClientContext*,const CLIPRDR_FORMAT_DATA_REQUEST*);
+    static UINT clipboardServerDataResponse(CliprdrClientContext*,const CLIPRDR_FORMAT_DATA_RESPONSE*);
     bool awaitCredentials(char** username, char** password, char** domain);
     DWORD awaitCertificate(const CertificateInfo& info);
     bool awaitWebAuthentication(const QString& authorizationUrl, QString& redirectUrl);
     void setState(SessionState state);
     void cleanup();
     void flushInput();
+    void flushDisplayResize();
+    void flushClipboard();
+    void bindClipboardContext(CliprdrClientContext* context);
 
     ConnectionSettings settings_;
     freerdp* instance_ = nullptr;
@@ -92,6 +113,16 @@ private:
     QMutex inputMutex_;
     QVector<InputEvent> inputEvents_;
     QMutex instanceMutex_;
+    QMutex displayMutex_;
+    QSize pendingDisplaySize_;
+    DispClientContext* displayControl_ = nullptr;
+    bool displayControlActive_ = false;
+    QMutex clipboardMutex_;
+    CliprdrClientContext* clipboardContext_ = nullptr;
+    QString localClipboardText_;
+    bool clipboardDirty_ = false;
+    bool clipboardHandshakeStarted_ = false;
+    bool clipboardServerReady_ = false;
 };
 } // namespace openrdp
 

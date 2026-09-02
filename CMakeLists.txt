@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(OpenRDP VERSION 0.1.0 LANGUAGES CXX)
+project(OpenRDP VERSION 0.2.0 LANGUAGES CXX)
 
 option(OPENRDP_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
@@ -9,22 +9,32 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Network Test)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Network Concurrent Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FREERDP REQUIRED IMPORTED_TARGET freerdp3 freerdp-client3 winpr3)
+pkg_check_modules(CUPS REQUIRED IMPORTED_TARGET cups)
 
 add_library(openrdp_core STATIC
+    src/channels/ClipboardText.cpp
+    src/channels/AudioConfiguration.cpp
+    src/channels/DriveRedirection.cpp
+    src/channels/PrinterRedirection.cpp
+    src/display/MonitorTopology.cpp
     src/app/ConnectionHistory.cpp
+    src/profiles/ProfileStore.cpp
+    src/profiles/RdpFile.cpp
+    src/profiles/RdpProfileMapper.cpp
     src/rdp/RdpSettings.cpp
     src/rdp/RdpInput.cpp
     src/rdp/RdpError.cpp
 )
 target_include_directories(openrdp_core PUBLIC src)
-target_link_libraries(openrdp_core PUBLIC Qt6::Core PkgConfig::FREERDP)
+target_link_libraries(openrdp_core PUBLIC Qt6::Core PkgConfig::FREERDP PkgConfig::CUPS)
 
 add_executable(openrdp
     src/main.cpp
     src/app/Application.cpp
+    src/channels/ClipboardManager.cpp
     src/gui/MainWindow.cpp
     src/gui/CredentialDialog.cpp
     src/gui/CertificateDialog.cpp
@@ -33,7 +43,7 @@ add_executable(openrdp
     src/rdp/RdpRenderer.cpp
 )
 target_include_directories(openrdp PRIVATE src)
-target_link_libraries(openrdp PRIVATE openrdp_core Qt6::Gui Qt6::Widgets Qt6::Network)
+target_link_libraries(openrdp PRIVATE openrdp_core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Concurrent)
 
 foreach(target openrdp openrdp_core)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wformat=2 -Wformat-security)
