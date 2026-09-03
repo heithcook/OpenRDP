@@ -33,6 +33,7 @@
 #include <QPushButton>
 #include <QSaveFile>
 #include <QScreen>
+#include <QShortcut>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStackedWidget>
@@ -41,6 +42,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
+#include <QWindow>
 #include <QtConcurrentRun>
 namespace openrdp {
 MainWindow::MainWindow(const QString& initialServer,const QString& initialUser,
@@ -138,9 +140,10 @@ MainWindow::MainWindow(const QString& initialServer,const QString& initialUser,
     connect(session_,&RdpSession::connected,this,[this,disconnectAction](QSize){
         if (pendingHistoryEntry_) {history_.record(*pendingHistoryEntry_);reloadSavedConnections();}
         pendingHistoryEntry_.reset();pages_->setCurrentWidget(display_);disconnectAction->setEnabled(true);clipboardManager_->setEnabled(clipboardEnabled_);microphoneIndicator_->setVisible(shareMicrophone_->isChecked());connectedAt_=QDateTime::currentDateTimeUtc();sessionServerLabel_->setText(QStringLiteral("Secure connection to %1").arg(computer_->text().trimmed()));sessionToolbar_->show();
+        if(activeMonitors_.size()>1)enterMultiMonitorPresentation();
     });
-    connect(session_,&RdpSession::disconnected,this,[this,disconnectAction]{microphoneIndicator_->hide();clipboardManager_->setEnabled(false);disconnectAction->setEnabled(false);sessionToolbar_->hide();connectedAt_={};sessionEnded();});
-    connect(session_,&RdpSession::frameUpdated,this,[this](const QImage& frame,QRect){display_->setFrame(frame);});
+    connect(session_,&RdpSession::disconnected,this,[this,disconnectAction]{leaveMultiMonitorPresentation();microphoneIndicator_->hide();clipboardManager_->setEnabled(false);disconnectAction->setEnabled(false);sessionToolbar_->hide();connectedAt_={};sessionEnded();});
+    connect(session_,&RdpSession::frameUpdated,this,[this](const QImage& frame,QRect){updateDisplayFrame(frame);});
     connect(display_,&RdpDisplayWidget::mouseInput,session_,&RdpSession::sendMouse,Qt::DirectConnection);
     connect(display_,&RdpDisplayWidget::keyInput,session_,&RdpSession::sendKey,Qt::DirectConnection);
     connect(display_,&RdpDisplayWidget::viewportResized,this,[this](QSize size){pendingDisplaySize_=size;resizeDebounce_->start();});
@@ -154,6 +157,7 @@ MainWindow::MainWindow(const QString& initialServer,const QString& initialUser,
 }
 MainWindow::~MainWindow(){emit stopSession();worker_.quit();worker_.wait(5000);delete session_;}
 void MainWindow::connectClicked(){QString error;auto parsed=parseServer(computer_->text(),&error);if(!parsed){QMessageBox::warning(this,QStringLiteral("OpenRDP"),error);return;} ConnectionSettings s; s.hostname=parsed->hostname;s.port=parsed->port;parseUsername(username_->text(),s.username,s.domain);s.authenticationMode=webAccount_->isChecked()?AuthenticationMode::EntraWebAccount:AuthenticationMode::NlaPassword;
+    activeMonitors_.clear();
     if(multiMonitor_->isChecked()){
         for(QScreen* screen:QGuiApplication::screens()){
             const qreal scale=screen->devicePixelRatio();const QRect logical=screen->geometry();
@@ -163,6 +167,7 @@ void MainWindow::connectClicked(){QString error;auto parsed=parseServer(computer
         }
         if(!validMonitorTopology(s.monitors,&error)){QMessageBox::warning(this,QStringLiteral("Monitor Configuration"),error);return;}
         s.dynamicResolution=false;
+        activeMonitors_=s.monitors;
     }
     clipboardEnabled_=shareClipboard_->isChecked();s.clipboard=clipboardEnabled_;s.audio.output=audioMode_->currentIndex()==1?RemoteAudioMode::Remote:audioMode_->currentIndex()==2?RemoteAudioMode::Disabled:RemoteAudioMode::Local;s.audio.microphone=shareMicrophone_->isChecked();s.audio.outputDevice=outputDevice_->currentText()==QStringLiteral("System Default")?QString():outputDevice_->currentText();s.audio.inputDevice=inputDevice_->currentText()==QStringLiteral("System Default")?QString():inputDevice_->currentText();
     for(const auto& folder:redirectedFolders_){const auto checked=validateRedirectedFolder(folder.name,folder.canonicalPath,&error);if(!checked){QMessageBox::warning(this,QStringLiteral("Local Folder Unavailable"),error);return;}s.folders.append(*checked);}
@@ -297,6 +302,7 @@ bool MainWindow::writeRdpFile(const QString& path){
     statusBar()->showMessage(QStringLiteral("Connection file saved."),3000);return true;
 }
 void MainWindow::toggleFullScreen(){
+    if(multiMonitorActive_){leaveMultiMonitorPresentation();return;}
     if(isFullScreen()){
         showNormal();
         if(!windowGeometryBeforeFullScreen_.isEmpty())restoreGeometry(windowGeometryBeforeFullScreen_);
@@ -307,6 +313,51 @@ void MainWindow::toggleFullScreen(){
         showFullScreen();
         fullScreenAction_->setChecked(true);
     }
+}
+
+void MainWindow::enterMultiMonitorPresentation(){
+    if(multiMonitorActive_||activeMonitors_.size()<2)return;
+    const auto rects=normalizedMonitorRects(activeMonitors_);
+    const auto screens=QGuiApplication::screens();
+    if(rects.size()!=activeMonitors_.size()||screens.size()<activeMonitors_.size())return;
+    int primaryIndex=0;
+    for(int i=0;i<activeMonitors_.size();++i)if(activeMonitors_.at(i).primary){primaryIndex=i;break;}
+    windowGeometryBeforeFullScreen_=saveGeometry();
+    display_->setSourceRect(rects.at(primaryIndex));
+    if(windowHandle())windowHandle()->setScreen(screens.at(primaryIndex));
+    menuBar()->hide();statusBar()->hide();sessionToolbar_->hide();
+    showFullScreen();fullScreenAction_->setChecked(true);multiMonitorActive_=true;
+    for(int i=0;i<activeMonitors_.size();++i){
+        if(i==primaryIndex)continue;
+        auto* window=new QWidget(nullptr,Qt::Window|Qt::FramelessWindowHint);
+        window->setAttribute(Qt::WA_DeleteOnClose);
+        window->setWindowTitle(QStringLiteral("OpenRDP — %1").arg(activeMonitors_.at(i).id));
+        auto* layout=new QVBoxLayout(window);layout->setContentsMargins(0,0,0,0);layout->setSpacing(0);
+        auto* view=new RdpDisplayWidget(window);view->setSourceRect(rects.at(i));layout->addWidget(view);
+        connect(view,&RdpDisplayWidget::mouseInput,session_,&RdpSession::sendMouse,Qt::DirectConnection);
+        connect(view,&RdpDisplayWidget::keyInput,session_,&RdpSession::sendKey,Qt::DirectConnection);
+        auto* exitShortcut=new QShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+Return")),window);
+        connect(exitShortcut,&QShortcut::activated,this,&MainWindow::leaveMultiMonitorPresentation);
+        monitorWindows_.append(window);monitorDisplays_.append(view);
+        window->createWinId();if(window->windowHandle())window->windowHandle()->setScreen(screens.at(i));
+        window->setGeometry(screens.at(i)->geometry());window->showFullScreen();
+    }
+}
+
+void MainWindow::leaveMultiMonitorPresentation(){
+    for(auto& window:monitorWindows_)if(window)window->close();
+    monitorWindows_.clear();monitorDisplays_.clear();
+    display_->setSourceRect({});
+    if(multiMonitorActive_){
+        multiMonitorActive_=false;showNormal();menuBar()->show();statusBar()->show();sessionToolbar_->show();
+        if(!windowGeometryBeforeFullScreen_.isEmpty())restoreGeometry(windowGeometryBeforeFullScreen_);
+        windowGeometryBeforeFullScreen_.clear();fullScreenAction_->setChecked(false);
+    }
+}
+
+void MainWindow::updateDisplayFrame(const QImage& frame){
+    display_->setFrame(frame);
+    for(auto& view:monitorDisplays_)if(view)view->setFrame(frame);
 }
 bool MainWindow::eventFilter(QObject* watched,QEvent* event){
     if(watched==display_&&isFullScreen()&&event->type()==QEvent::MouseMove){

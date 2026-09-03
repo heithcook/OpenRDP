@@ -53,4 +53,16 @@ QVector<rdpMonitor> toFreeRdpMonitors(const QVector<MonitorInfo>& monitors)
     return result;
 }
 
+QVector<QRect> normalizedMonitorRects(const QVector<MonitorInfo>& monitors)
+{
+    QVector<QRect> result;
+    if (!validMonitorTopology(monitors)) return result;
+    QRect desktop;
+    for (const auto& monitor : monitors) desktop = desktop.united(monitor.pixelGeometry);
+    result.reserve(monitors.size());
+    for (const auto& monitor : monitors)
+        result.append(monitor.pixelGeometry.translated(-desktop.topLeft()));
+    return result;
+}
+
 } // namespace openrdp

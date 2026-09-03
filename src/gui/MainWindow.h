@@ -1,5 +1,6 @@
 #pragma once
 #include <QMainWindow>
+#include <QPointer>
 #include <QThread>
 #include <optional>
 #include "app/ConnectionHistory.h"
@@ -61,6 +62,10 @@ private:
     QTimer* resizeDebounce_ = nullptr;
     QTimer* toolbarHideTimer_ = nullptr;
     QSize pendingDisplaySize_;
+    QVector<MonitorInfo> activeMonitors_;
+    QVector<QPointer<QWidget>> monitorWindows_;
+    QVector<QPointer<RdpDisplayWidget>> monitorDisplays_;
+    bool multiMonitorActive_ = false;
     ClipboardManager* clipboardManager_ = nullptr;
     bool clipboardEnabled_ = true;
     QDateTime connectedAt_;
@@ -70,5 +75,8 @@ private:
     void reloadProfiles();
     ConnectionProfile profileFromEditor() const;
     void applyProfile(const ConnectionProfile& profile);
+    void enterMultiMonitorPresentation();
+    void leaveMultiMonitorPresentation();
+    void updateDisplayFrame(const QImage& frame);
 };
 }

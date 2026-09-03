@@ -68,6 +68,14 @@ private slots:
         duplicate[1].id=QStringLiteral("second"); duplicate[1].primary=true;
         QVERIFY(!openrdp::validMonitorTopology(duplicate, &error));
     }
+    void normalizedMonitorPresentationRects() {
+        const QVector<openrdp::MonitorInfo> monitors{
+            {QStringLiteral("left"),QRect(-1920,0,1920,1080),QSize(500,300),1.0,0,false},
+            {QStringLiteral("primary"),QRect(0,0,2560,1440),QSize(600,340),1.0,0,true},
+            {QStringLiteral("upper"),QRect(2560,-900,1600,900),QSize(400,230),1.0,0,false}};
+        const auto rects=openrdp::normalizedMonitorRects(monitors);
+        QCOMPARE(rects,QVector<QRect>({QRect(0,900,1920,1080),QRect(1920,900,2560,1440),QRect(4480,0,1600,900)}));
+    }
     void clipboardUnicodeRoundTrip() {
         const QString source=QString::fromUtf8("Hello\nGrüße — 世界 🚀");
         const QByteArray encoded=openrdp::encodeClipboardText(source);

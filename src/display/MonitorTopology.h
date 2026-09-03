@@ -18,5 +18,6 @@ struct MonitorInfo {
 
 QVector<rdpMonitor> toFreeRdpMonitors(const QVector<MonitorInfo>& monitors);
 bool validMonitorTopology(const QVector<MonitorInfo>& monitors, QString* error = nullptr);
+QVector<QRect> normalizedMonitorRects(const QVector<MonitorInfo>& monitors);
 
 } // namespace openrdp
