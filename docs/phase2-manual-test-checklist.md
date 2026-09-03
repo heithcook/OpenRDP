@@ -33,6 +33,9 @@ recorded as PASS until observed.
 - Test two horizontal, two vertical, three, and four monitors where available, including
   portrait, negative coordinates, non-leftmost primary, mixed resolution, and mixed DPI.
 - In Windows Display Settings, confirm actual remote monitor topology and per-monitor maximize.
+- **FAIL (2026-09-03, Wayland, two monitors):** the server negotiated the combined topology,
+  but both remote desktops were rendered inside one local window on a single monitor. Native
+  per-monitor fullscreen presentation and input-coordinate mapping remain to be implemented.
 
 ## Clipboard
 

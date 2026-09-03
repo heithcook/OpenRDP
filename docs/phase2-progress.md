@@ -127,6 +127,13 @@ Wayland/X11, monitor, audio, printer, and long-session checks in
 not claimed; Phase 2's mandatory bidirectional text implementation is present. Smart cards
 remain deferred to Phase 3 by user direction.
 
+Multi-monitor presentation currently **FAILS** physical Wayland validation. On 2026-09-03,
+the Windows session negotiated a combined two-monitor remote framebuffer, but OpenRDP
+displayed both remote desktops inside one local window on a single monitor. The protocol
+topology path is working; the missing presentation layer needs one fullscreen top-level
+surface per selected physical display, with each surface painting its framebuffer crop and
+translating pointer coordinates back into the combined remote desktop.
+
 ## SESSION CHECKPOINT
 
 Accomplished the Phase 1-to-Phase 2 transition and design foundation; secure `.rdp`
