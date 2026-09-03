@@ -132,8 +132,10 @@ the Windows session negotiated a combined two-monitor remote framebuffer, but Op
 displayed both remote desktops inside one local window. OpenRDP now creates one fullscreen
 top-level surface per selected physical display. Each surface paints its normalized crop of
 the combined framebuffer and translates pointer input into combined-desktop coordinates.
-Automated tests cover crop normalization with negative and offset monitor coordinates; the
-new presentation path is **IMPLEMENTED — AWAITING PHYSICAL RETEST**.
+Automated tests cover crop normalization with negative and offset monitor coordinates. On
+2026-09-03, the user confirmed that the new presentation path correctly displayed the remote
+desktops across two physical monitors on Wayland. Two-monitor presentation is **PASS**;
+additional topology, mixed-DPI, and endurance cases remain to be validated.
 
 ## SESSION CHECKPOINT
 

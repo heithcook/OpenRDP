@@ -33,10 +33,9 @@ recorded as PASS until observed.
 - Test two horizontal, two vertical, three, and four monitors where available, including
   portrait, negative coordinates, non-leftmost primary, mixed resolution, and mixed DPI.
 - In Windows Display Settings, confirm actual remote monitor topology and per-monitor maximize.
-- **RETEST (2026-09-03, Wayland, two monitors):** the first run negotiated the combined
-  topology but rendered both desktops inside one local window. A per-screen fullscreen
-  presentation layer with normalized framebuffer crops and combined input coordinates is now
-  implemented; verify placement, pixels, pointer alignment, keyboard focus, and fullscreen exit.
+- **PASS (2026-09-03, Wayland, two monitors):** after adding per-screen fullscreen surfaces,
+  the user confirmed that the remote desktops display correctly across both physical monitors.
+  Additional portrait, mixed-DPI, three/four-monitor, and endurance cases remain open.
 
 ## Clipboard
 
